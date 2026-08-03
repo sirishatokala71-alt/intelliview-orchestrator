@@ -1,39 +1,15 @@
-# Python
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
-*.egg-info/
-.eggs/
-dist/
-build/
-
-# Virtual environments
+.env
 .venv/
 venv/
-env/
-
-# Environment files (never commit real secrets)
-.env
-.env.local
-.env.*.local
-
-# Test / coverage
 .pytest_cache/
 .coverage
 htmlcov/
-
-# Type checking / linting caches
-.mypy_cache/
-.ruff_cache/
-
-# IDE
+*.egg-info/
 .idea/
 .vscode/
-
-# Binary installers (should never be committed)
-*.msi
-*.zip
 
 # Frontend
 frontend/node_modules/
@@ -41,4 +17,4 @@ frontend/.next/
 frontend/out/
 frontend/.env.local
 frontend/*.tsbuildinfo
-STABILIZATION_REPORT.md
+

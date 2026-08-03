@@ -40,19 +40,10 @@ Base = declarative_base()
 def get_db():
     """
     FastAPI dependency that provides a database session.
-
-    Ensures failed transactions are rolled back and the session
-    is always closed after the request finishes.
+    Automatically closes the session after the request finishes.
     """
     db = SessionLocal()
-
     try:
         yield db
-
-    except Exception:
-        db.rollback()
-        logger.exception("Database session failed; transaction rolled back")
-        raise
-
     finally:
         db.close()

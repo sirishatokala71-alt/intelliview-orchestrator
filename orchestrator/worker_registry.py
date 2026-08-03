@@ -7,7 +7,7 @@ Responsibilities:
 - Track worker capacity and active tasks
 - Maintain worker health status
 - Provide worker availability queries
-- Real-time multi-instance sync via Redis Pub/Sub
+- Maintain real-time multi-instance cache sync via Redis Pub/Sub with graceful shutdown
 """
 
 import asyncio
@@ -16,20 +16,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Any
-
-# Import Prometheus worker monitoring metrics
-from metrics.prometheus_metrics import (
-    WORKER_ACTIVE_TASKS,
-    WORKER_CAPACITY,
-    WORKERS_HEALTHY,
-    WORKERS_REGISTERED,
-    WORKERS_UNHEALTHY,
-)
 from orchestrator.redis_client import get_redis_client
-
 logger = logging.getLogger(__name__)
-
-
 class WorkerRegistry:
     """
     Centralized registry for tracking worker nodes in the system
@@ -40,7 +28,8 @@ class WorkerRegistry:
     WORKER_SET_KEY = "workers:all"
     WORKER_HEARTBEAT_KEY = "worker:heartbeat:"
     HEARTBEAT_TIMEOUT = 60  # seconds
-    SYNC_CHANNEL = "worker_registry_sync"
+
+    SYNC_CHANNEL = "workers:cache:sync"
 
     def __init__(self):
         """Initialize worker registry"""
@@ -58,16 +47,20 @@ class WorkerRegistry:
             if self.redis_client:
                 try:
                     loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop is not None:
                     task = loop.create_task(self._start_pubsub_listener())
                     self.background_tasks.add(task)
                     task.add_done_callback(self.background_tasks.discard)
                     logger.info("Worker Registry initialized with Pub/Sub Sync")
-                except RuntimeError:
-                    # No running event loop (pytest/unit tests)
-                    logger.debug("Skipping Pub/Sub listener because no event loop is running")
+                else:
+                    logger.warning(
+                        "Pub/Sub listener not started (no event loop); "
+                        "multi-instance sync will be unavailable."
+                    )
             else:
                 logger.warning("Worker Registry initialized WITHOUT Redis connection")
-
         except Exception as e:
             logger.error(f"Error initializing Worker Registry: {e!s}")
             self.redis_client = None
@@ -101,7 +94,6 @@ class WorkerRegistry:
             self._hydrated = True
         except Exception as exc:
             logger.warning("Could not hydrate worker registry from Redis: %s", exc)
-
     def _get_native_redis_client(self) -> Any:
         """Helper to safely extract the raw, native Redis client from CacheManager / wrappers"""
         if not self.redis_client:
@@ -121,23 +113,25 @@ class WorkerRegistry:
                 client = client.client
             else:
                 break
+
         return client if hasattr(client, "pubsub") else None
 
     async def _start_pubsub_listener(self) -> None:
-        """Background asynchronous loop listening for cache updates from other instances"""
+        """Background task that listens on the Redis Pub/Sub sync channel
+        and applies incoming messages to the local worker cache."""
         native = self._get_native_redis_client()
         if not native:
+            logger.warning("Cannot start Pub/Sub listener: no native Redis client available")
             return
 
-        pubsub = None
+        pubsub = native.pubsub()
         try:
-            pubsub = native.pubsub()
             pubsub.subscribe(self.SYNC_CHANNEL)
-            logger.info(f"Subscribed to Redis channel: {self.SYNC_CHANNEL}")
-
             while True:
                 try:
-                    message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    message = await asyncio.to_thread(
+                        pubsub.get_message, ignore_subscribe_messages=True, timeout=1.0
+                    )
                     if message:
                         self._handle_pubsub_message(message)
                 except Exception as e:
@@ -203,10 +197,8 @@ class WorkerRegistry:
         native = self._get_native_redis_client()
         if native:
             try:
-                native.publish(
-                    self.SYNC_CHANNEL,
-                    json.dumps({"worker_id": worker_id, "action": action}),
-                )
+                payload = json.dumps({"worker_id": worker_id, "action": action})
+                native.publish(self.SYNC_CHANNEL, payload)
             except Exception as e:
                 logger.error(f"Failed to publish sync broadcast: {e!s}")
 
@@ -263,18 +255,6 @@ class WorkerRegistry:
                 self._trigger_sync_broadcast(worker_id)
 
             logger.info(f"Registered worker: {worker_id} with capacity {capacity}")
-
-            # Update total registered workers metric
-            WORKERS_REGISTERED.set(len(self.local_workers))
-            # Update healthy worker count
-            WORKERS_HEALTHY.set(sum(1 for w in self.local_workers.values() if w["status"] == "healthy"))
-            # Update unhealthy worker count
-            WORKERS_UNHEALTHY.set(sum(1 for w in self.local_workers.values() if w["status"] == "unhealthy"))
-            # Store capacity allocated to this worker
-            WORKER_CAPACITY.labels(worker_id=worker_id).set(capacity)
-            # Initialize active task metric for the new worker
-            WORKER_ACTIVE_TASKS.labels(worker_id=worker_id).set(0)
-
             return True
 
         except Exception as e:
@@ -364,16 +344,6 @@ class WorkerRegistry:
                     self._trigger_sync_broadcast(worker_id)
 
             logger.debug(f"Heartbeat from {worker_id}: {active_tasks} active tasks")
-
-            # Update worker active task count from heartbeat
-            WORKER_ACTIVE_TASKS.labels(worker_id=worker_id).set(active_tasks)
-
-            # Refresh healthy worker metric after heartbeat
-            WORKERS_HEALTHY.set(sum(1 for w in self.local_workers.values() if w["status"] == "healthy"))
-
-            # Refresh unhealthy worker metric after heartbeat
-            WORKERS_UNHEALTHY.set(sum(1 for w in self.local_workers.values() if w["status"] == "unhealthy"))
-
             return True
 
         except Exception as e:
@@ -528,7 +498,6 @@ class WorkerRegistry:
                 if last_hb < timeout_threshold:
                     unhealthy.append(worker_id)
                     worker["status"] = "unhealthy"
-
         # Broadcast if status changes to unhealthy
         for wid in unhealthy:
             self._trigger_sync_broadcast(wid)
@@ -551,14 +520,6 @@ class WorkerRegistry:
                 self._trigger_sync_broadcast(worker_id, action="deregister")
 
             logger.info(f"Deregistered worker: {worker_id}")
-
-            # Update Prometheus metrics
-            WORKERS_REGISTERED.set(len(self.local_workers))
-
-            WORKERS_HEALTHY.set(sum(1 for w in self.local_workers.values() if w["status"] == "healthy"))
-
-            WORKERS_UNHEALTHY.set(sum(1 for w in self.local_workers.values() if w["status"] == "unhealthy"))
-
             return True
         except Exception as e:
             logger.error(f"Error deregistering worker: {e!s}")

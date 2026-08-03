@@ -8,7 +8,6 @@ import { StatusBadge } from "@/components/Badge";
 import { Skeleton, ErrorState, EmptyState } from "@/components/States";
 import Sparkline from "@/components/Sparkline";
 import { formatPercent, formatRelative } from "@/lib/utils";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const MAX_SAMPLES = 20;
 
@@ -47,8 +46,7 @@ export default function OverviewPage() {
   }, [workers.data?.workers]);
 
   return (
-    <ErrorBoundary>
-      <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-50">Overview</h1>
@@ -61,7 +59,7 @@ export default function OverviewPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="glass-card p-4 animate-slide-in-up [animation-delay:0ms]">
+        <div className="glass-card p-4 animate-slide-in-up" style={{ animationDelay: "0ms" }}>
           <Stat
             label="System"
             value={health.data ? <StatusBadge status={health.data.overall_status} /> : <Skeleton className="h-7 w-20" />}
@@ -69,7 +67,7 @@ export default function OverviewPage() {
             icon={<Activity size={16} />}
           />
         </div>
-        <div className="glass-card p-4 animate-slide-in-up [animation-delay:50ms]">
+        <div className="glass-card p-4 animate-slide-in-up" style={{ animationDelay: "50ms" }}>
           <Stat
             label="Workers"
             value={
@@ -83,7 +81,7 @@ export default function OverviewPage() {
             icon={<Users size={16} />}
           />
         </div>
-        <div className="glass-card p-4 animate-slide-in-up [animation-delay:100ms]">
+        <div className="glass-card p-4 animate-slide-in-up" style={{ animationDelay: "100ms" }}>
           <Stat
             label="Completed"
             value={stats.data ? stats.data.completed_sessions : <Skeleton className="h-7 w-12" />}
@@ -91,7 +89,7 @@ export default function OverviewPage() {
             icon={<CheckCircle2 size={16} />}
           />
         </div>
-        <div className="glass-card p-4 animate-slide-in-up [animation-delay:150ms]">
+        <div className="glass-card p-4 animate-slide-in-up" style={{ animationDelay: "150ms" }}>
           <Stat
             label="Avg risk"
             value={
@@ -213,7 +211,6 @@ export default function OverviewPage() {
           </div>
         )}
       </Card>
-      </div>
-    </ErrorBoundary>
+    </div>
   );
 }

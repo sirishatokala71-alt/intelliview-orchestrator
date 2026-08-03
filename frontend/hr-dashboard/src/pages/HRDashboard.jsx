@@ -4,7 +4,6 @@ import FilterBar from "../components/FilterBar";
 import CandidateTable from "../components/CandidateTable";
 import Pagination from "../components/Pagination";
 import DashboardSkeleton from "../components/DashboardSkeleton";
-import reportWebVitals from "../utils/reportWebVitals";
 
 
 // Bigger mock dataset so filtering actually has something to filter
@@ -45,11 +44,7 @@ function HRDashboard() {
 
   useEffect(() => {
     document.title = "HR Dashboard";
-  }, []);
-
-  useEffect(() => {
-    reportWebVitals();
-  }, []);
+    main
 
   useEffect(() => {
     fetchDashboardData();
